@@ -446,6 +446,105 @@ def plot_event_summary_interactive():
 
     return fig
 
+def plot_mistakes_vs_match_intensity():
+    df_ = df.copy()
+    df_ = df_.rename(columns={'Yellow ': 'Yellow'})
+    df_['StartDate'] = pd.to_datetime(df['StartDate'], errors='coerce')
+    df_ = df_.dropna(subset=['StartDate'])
+
+    # Match-level grouping
+    game_summary = df_.groupby(['StartDate', 'Event', 'Country']).agg(
+        Total_Yellow=('Yellow', 'sum'),
+        Total_Corner=('Corner', 'sum'),
+        Mistake_Count=('MistakeType', 'count'),
+        Unique_Statisticians=('Statistician (Adjusted) Name', pd.Series.nunique)
+    ).reset_index()
+
+    # Add match intensity
+    game_summary['Match_Intensity'] = game_summary['Total_Yellow'] + game_summary['Total_Corner']
+
+    # Create figure
+    fig = go.Figure()
+
+    for country, color in zip(['England', 'Scotland'], ['orange', 'skyblue']):
+        subset = game_summary[game_summary['Country'] == country]
+
+        fig.add_trace(go.Scatter(
+            x=subset['Match_Intensity'],
+            y=subset['Mistake_Count'],
+            mode='markers',
+            name=f"{country}",
+            marker=dict(size=subset['Unique_Statisticians'] * 3, color=color, opacity=0.7),
+            hovertemplate='Intensity: %{x}<br>Mistakes: %{y}<br>Statisticians: %{marker.size}<extra></extra>'
+        ))
+
+        if len(subset) >= 2:
+            coeffs = np.polyfit(subset['Match_Intensity'], subset['Mistake_Count'], deg=1)
+            x_range = np.linspace(subset['Match_Intensity'].min(), subset['Match_Intensity'].max(), 100)
+            y_pred = np.polyval(coeffs, x_range)
+            fig.add_trace(go.Scatter(
+                x=x_range,
+                y=y_pred,
+                mode='lines',
+                name=f"{country} Trend",
+                line=dict(dash='dot', width=2, color=color)
+            ))
+
+    # Layout
+    fig.update_layout(
+        title='Mistakes vs Match Intensity with Statistician Complexity Overlay',
+        xaxis_title='Match Intensity (Yellow + Corners)',
+        yaxis_title='Number of Mistakes',
+        template='plotly_dark',
+        plot_bgcolor='black',
+        paper_bgcolor='black',
+        font=dict(color='white'),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5)
+    )
+
+    return fig
+
+def plot_mistake_rate_per_100_events():
+
+    df_2 = df.copy()
+    df_2 = df_2.rename(columns={'Yellow ': 'Yellow'})
+    df_2['StartDate'] = pd.to_datetime(df_2['StartDate'], errors='coerce')
+    df_2 = df_2.dropna(subset=['StartDate'])
+
+    # Aggregate game-level data
+    game_summary = df_2.groupby(['StartDate', 'Event', 'Country']).agg(
+        Total_Yellow=('Yellow', 'sum'),
+        Total_Corner=('Corner', 'sum'),
+        Mistake_Count=('MistakeType', 'count')
+    ).reset_index()
+
+    # Compute total events and normalised mistake rate
+    game_summary['Total_Events'] = game_summary['Total_Yellow'] + game_summary['Total_Corner']
+    game_summary = game_summary[game_summary['Total_Events'] > 0]
+    game_summary['Mistakes_per_100_Events'] = (game_summary['Mistake_Count'] / game_summary['Total_Events']) * 100
+
+    # Plot box + scatter
+    fig = px.box(
+        game_summary,
+        x='Country',
+        y='Mistakes_per_100_Events',
+        color='Country',
+        points='all',
+        title='Mistake Rate per 100 Events by Country',
+        template='plotly_dark',
+        labels={'Mistakes_per_100_Events': 'Mistakes per 100 Events'}
+    )
+
+    fig.update_layout(
+        title_font_size=20,
+        font=dict(color='white'),
+        plot_bgcolor='black',
+        paper_bgcolor='black'
+    )
+
+    return fig
+
+
 def plot_mistake_forecast():
     df_prophet = df.copy()
     df_prophet['StartDate'] = pd.to_datetime(df_prophet['StartDate'])
@@ -667,7 +766,9 @@ plot_names = {
     "🧑‍💻 Top Statisticians": plot_top_statisticians,
     "📅 Monthly Mistakes": plot_monthly_mistake_trend,
     "🌍 England vs Scotland": plot_geographic_trend,
-    "📊 Actual Events + Stat Overlay": plot_event_summary_interactive
+    "📊 Actual Events + Stat Overlay": plot_event_summary_interactive,
+    "🧮 Mistake Rate - Normalised": plot_mistake_rate_per_100_events,
+    "📉 Mistakes vs Match Intensity": plot_mistakes_vs_match_intensity
 }
 
 # Sidebar navigation for ML
@@ -755,6 +856,11 @@ if section == "EDA":
             st.write("The chart titled “Geographic Impact: Mistakes Over Time (England vs Scotland)” compares the monthly number of recorded mistakes in England and Scotland from early 2022 to late 2024. A clear distinction is observed: England consistently reports a higher number of mistakes than Scotland throughout the period. A red vertical dashed line highlights the introduction of VAR in Scotland, which occurred in October 2023. Interestingly, the implementation of VAR appears to coincide with a slight increase in Scotland’s mistake counts in the following months, though they remain significantly lower than England’s. The consistent gap between the two countries suggests that environmental or structural differences may influence data collection challenges. Factors could include differences in league intensity, match pace, staffing models, or even match complexity. The VAR marker also adds an important dimension, helping analysts consider how technological changes might alter the statistician’s workload or timing. For statisticians and decision-makers, this visual reinforces the need to interpret mistake trends in the context of local league structures and operational realities. It also opens up questions about how tools like VAR may impact accuracy and whether support models should differ between countries or match levels.")
         elif selected_plot == "📊 Actual Events + Stat Overlay":
             st.write("The chart titled “All Games Event Breakdown with Statistician Overlay” presents a detailed view of actual game events across the full dataset, with a focus on yellow cards, corners, and statistician mistakes. Each thin vertical bar represents a single football game, with red indicating actual corners and yellow stacked above for actual yellow cards, allowing a quick assessment of total events per match. Overlaid on the bars is a very lean dotted green line showing the number of statistician mistakes per game, helping to track error trends alongside match intensity. Users can switch between weekly, monthly, yearly, and all-game groupings using the buttons at the top-left corner of the chart, offering flexible exploration of data density over time. The visual highlights the variability in game events and suggests a potential relationship between high-event matches and error counts. Particularly dense matches often align with slight rises in statistician mistakes, which may imply cognitive load challenges during busy fixtures. By combining detailed event counts with overlayed error trends, this chart enables analysts and coordinators to spot patterns in workload pressure, helping to guide support planning and error reduction strategies for future fixtures.")
+        elif selected_plot == "🧮 Mistake Rate - Normalised":
+            st.write("The chart titled “Mistake Rate per 100 Events by Country“ presents a normalised view of errors by comparing the number of mistakes made per 100 in-game events (yellow cards and corners) in England and Scotland. This box-and-scatter plot reveals the consistency and extremity of performance between countries. Scotland shows a tighter distribution with fewer outliers and a lower overall spread, suggesting greater consistency and control in mistake handling per match intensity. In contrast, England not only has a broader range but also a number of high outliers, including cases where mistake rates spike dramatically—indicating potential issues during high-pressure games. The central tendency (median) between the two is relatively similar, but the presence of extreme outliers in England skews the perception of mistake risk. This normalised comparison supports a data-backed conclusion: while both countries may operate under similar base conditions, England’s mistake profile includes more volatile scenarios, likely triggered by either extreme match conditions or inconsistent operational execution. This makes the case for a deeper review of high-mistake matches to identify root causes.")
+        elif selected_plot == "📉 Mistakes vs Match Intensity":
+            st.write("The chart titled “Mistakes vs Match Intensity with Statistician Complexity Overlay“ visualises how the number of mistakes correlates with match intensity—defined as the total number of yellow cards and corners—across England and Scotland. Each point represents a game, with the size of the point indicating how many statisticians were involved. The dotted regression lines show the trend for each country. Interestingly, Scotland exhibits a steeper trend line, suggesting that mistakes increase more rapidly with intensity compared to England. This may imply that Scotland’s mistake count is more sensitive to rising match pressure, potentially due to fewer resources, less experience, or operational factors. However, the number of statisticians involved (point size) does not dramatically differ, hinting that errors may not be purely due to workload but could relate to how each region manages fast-paced or complex matches. This chart helps decision-makers assess whether mistake patterns stem more from match dynamics or the supporting personnel model.")
+
 else:
     fig = plot_names_ml[selected_plot]()
     st.plotly_chart(fig, use_container_width=True)
